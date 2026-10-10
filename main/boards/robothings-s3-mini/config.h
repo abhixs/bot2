@@ -1,0 +1,88 @@
+#ifndef _BOARD_CONFIG_H_
+#define _BOARD_CONFIG_H_
+
+#include <driver/gpio.h>
+#include <sdkconfig.h>
+
+// RoboThings S3 Mini: ESP32-S3 Super Mini Zero (4MB flash, 2MB PSRAM),
+// INMP441 mic, MAX98357A amp, SSD1306 128x64 OLED, 4 buttons, lamp relay.
+// Same wiring as the original Xiaozhi-Esp32s3mini firmware.
+
+#define AUDIO_INPUT_SAMPLE_RATE  16000
+
+#if CONFIG_ROBOTHINGS_DUPLEX_I2S
+
+// Duplex variant: the INMP441 SCK/WS are wired to the MAX98357A BCLK/LRC, so
+// mic and speaker share one I2S port and one clock (both at 16 kHz).
+//   ESP32 GPIO 2 -> amp BCLK + mic SCK
+//   ESP32 GPIO 3 -> amp LRC  + mic WS
+//   ESP32 GPIO 1 -> amp DIN
+//   ESP32 GPIO 6 <- mic SD
+// GPIO 4/5 (old mic clock pins) are not used and stay high-impedance inputs.
+#define AUDIO_I2S_METHOD_DUPLEX
+#define AUDIO_OUTPUT_SAMPLE_RATE 16000
+
+#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_2
+#define AUDIO_I2S_GPIO_WS   GPIO_NUM_3
+#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_1
+#define AUDIO_I2S_GPIO_DIN  GPIO_NUM_6
+#define AUDIO_I2S_UNUSED_GPIO_A GPIO_NUM_4
+#define AUDIO_I2S_UNUSED_GPIO_B GPIO_NUM_5
+
+#else
+
+// Original wiring: mic and speaker on separate I2S ports.
+#define AUDIO_I2S_METHOD_SIMPLEX
+#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+
+#define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_4
+#define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_5
+#define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_6
+#define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_1
+#define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_2
+#define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_3
+
+#endif
+
+// Speaker volume ceiling (0-100). A clean, undistorted speaker is much easier
+// for the echo canceller to remove, so the volume is never driven to the top.
+#define SPEAKER_MAX_VOLUME 85
+
+
+#define BUILTIN_LED_GPIO        GPIO_NUM_21
+#define BOOT_BUTTON_GPIO        GPIO_NUM_0
+#define TOUCH_BUTTON_GPIO       GPIO_NUM_11
+#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_9
+#define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_10
+
+#define DISPLAY_SDA_PIN GPIO_NUM_7
+#define DISPLAY_SCL_PIN GPIO_NUM_8
+#define DISPLAY_WIDTH   128
+
+#if CONFIG_OLED_SSD1306_128X32
+#define DISPLAY_HEIGHT  32
+#elif CONFIG_OLED_SSD1306_128X64
+#define DISPLAY_HEIGHT  64
+#elif CONFIG_OLED_SH1106_128X64
+#define DISPLAY_HEIGHT  64
+#define SH1106
+#else
+#error "OLED display type is not selected"
+#endif
+
+#ifdef SH1106
+// 1.3" modules: the SH1106 driver maps mirror=false to the usual upright
+// orientation (segment remap 0xA1, COM scan 0xC8).
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
+#else
+// 0.96" SSD1306 modules.
+#define DISPLAY_MIRROR_X true
+#define DISPLAY_MIRROR_Y true
+#endif
+
+
+// Lamp relay (voice controlled, can also switch on with an alarm)
+#define LAMP_GPIO GPIO_NUM_12
+
+#endif // _BOARD_CONFIG_H_

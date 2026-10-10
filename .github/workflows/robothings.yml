@@ -1,0 +1,88 @@
+name: Build RoboThings firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      language:
+        description: "Device prompt language (en-US, zh-CN, hi-IN, ...)"
+        default: "en-US"
+      wake_word:
+        description: "Wake word: nihaoxiaozhi, wn9_hiesp, wn9_jarvis_tts, wn9_alexa, disabled ..."
+        default: "wn9_alexa"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build robothings-s3-mini
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v6.1
+    env:
+      LANGUAGE: ${{ inputs.language || 'en-US' }}
+      WAKE_WORD: ${{ inputs.wake_word || 'wn9_alexa' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build all display and wiring variants
+        shell: bash
+        run: |
+          set -eo pipefail
+          # On failure, surface the error lines as annotations (readable without logs).
+          trap 'grep -hE "error:|Error|FAILED|Traceback|skip " build*.log 2>/dev/null | tail -15 | while IFS= read -r l; do echo "::error::$l"; done' ERR
+          source "$IDF_PATH/export.sh"
+          OUT=robothings-firmware
+          mkdir -p "$OUT"
+          for VARIANT in robothings-s3-mini robothings-s3-mini-sh1106 robothings-s3-mini-duplex robothings-s3-mini-sh1106-duplex; do
+            rm -rf build sdkconfig
+            python scripts/build.py robothings-s3-mini --name "$VARIANT" \
+              --language "$LANGUAGE" --wake-word "$WAKE_WORD" 2>&1 | tee "build-$VARIANT.log"
+            case "$VARIANT" in
+              robothings-s3-mini)               DIR=firmware ;;
+              robothings-s3-mini-sh1106)        DIR=firmware-sh1106 ;;
+              robothings-s3-mini-duplex)        DIR=firmware-duplex ;;
+              robothings-s3-mini-sh1106-duplex) DIR=firmware-sh1106-duplex ;;
+            esac
+            mkdir -p "$OUT/$DIR"
+            cp build/bootloader/bootloader.bin            "$OUT/$DIR/"
+            cp build/partition_table/partition-table.bin  "$OUT/$DIR/"
+            cp build/ota_data_initial.bin                 "$OUT/$DIR/"
+            cp build/xiaozhi.bin                          "$OUT/$DIR/"
+            cp build/generated_assets.bin                 "$OUT/$DIR/"
+            cp build/merged-binary.bin                    "$OUT/$DIR/"
+            APP=$(stat -c %s build/xiaozhi.bin)
+            ASSETS=$(stat -c %s build/generated_assets.bin)
+            test "$APP" -le $((0x2F0000))
+            test "$ASSETS" -le $((0x100000))
+            echo "- $VARIANT: app $APP / $((0x2F0000)) bytes, assets $ASSETS / $((0x100000)) bytes" >> "$GITHUB_STEP_SUMMARY"
+          done
+          cp flasher/index.html flasher/manifest*.json flasher/README.md "$OUT/"
+          cp -r tools/music-server "$OUT/music-server"
+          echo "- language: $LANGUAGE, wake word: $WAKE_WORD" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: robothings-firmware
+          path: robothings-firmware
+          if-no-files-found: error
+
+      - name: Publish flasher to gh-pages
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -e
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          cd robothings-firmware
+          touch .nojekyll
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Firmware build ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
